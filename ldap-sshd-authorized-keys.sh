@@ -23,6 +23,42 @@ detect_sshd_service() {
   fi
 }
 
+install_ldap_ca() {
+  local ca_source="${SCRIPT_DIR}/ca.pem"
+
+  if [[ ! -f "$ca_source" ]]; then
+    echo "WARNING: Missing ${ca_source}; skipping LDAP CA installation." >&2
+    return 0
+  fi
+
+  if command -v update-ca-certificates >/dev/null 2>&1; then
+    echo "Installing LDAP CA using update-ca-certificates..."
+    install -o root -g root -m 0644 "$ca_source" \
+      /usr/local/share/ca-certificates/ca.pem
+    update-ca-certificates
+
+  elif command -v trust >/dev/null 2>&1; then
+    echo "Installing LDAP CA using p11-kit trust..."
+    install -d -o root -g root -m 0755 \
+      /etc/ca-certificates/trust-source/anchors
+    install -o root -g root -m 0644 "$ca_source" \
+      /etc/ca-certificates/trust-source/anchors/ca.pem
+    trust extract-compat
+
+  elif command -v update-ca-trust >/dev/null 2>&1; then
+    echo "Installing LDAP CA using update-ca-trust..."
+    install -d -o root -g root -m 0755 \
+      /etc/pki/ca-trust/source/anchors
+    install -o root -g root -m 0644 "$ca_source" \
+      /etc/pki/ca-trust/source/anchors/ca.pem
+    update-ca-trust
+
+  else
+    echo "WARNING: Could not detect CA trust update tool." >&2
+    echo "Install ${ca_source} manually into this system's trust store." >&2
+  fi
+}
+
 HELPER_USER="sshd-ldap"
 HELPER_PATH="/usr/local/sbin/ldap-authorized-keys"
 SECRET_PATH="/etc/ssh/ldap-authorized-keys.secret"
@@ -143,6 +179,8 @@ AuthorizedKeysFile none
 AuthorizedKeysCommand $HELPER_PATH %u
 AuthorizedKeysCommandUser $HELPER_USER
 EOF
+
+install_ldap_ca
 
 echo "Validating sshd configuration..."
 if ! sshd -t; then
