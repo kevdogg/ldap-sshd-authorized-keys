@@ -22,14 +22,17 @@ This allows centralized SSH public key management while preserving optional loca
 | Arch Linux | Working |
 | Ubuntu Server | Working |
 
-Tested features:
+Validated Features:
 
-- sshd_config.d include insertion
-- LDAP over LDAPS
-- Custom internal CA trust installation
-- Multiple sshPublicKey values
-- AuthorizedKeysCommand integration
-- SSH login validation
+- LDAPS connectivity
+- Internal CA trust installation
+- Automatic LDAP client installation
+- SSH AuthorizedKeysCommand integration
+- Multiple LDAP sshPublicKey values
+- sshd_config.d Include insertion
+- SSH certificate coexistence detection
+- ssh.service / sshd.service detection
+- Local authorized_keys fallback during LDAP failure
 
 ---
 
@@ -95,27 +98,27 @@ Install:
 
 Already present on most systems.
 
-### OpenLDAP client tools
+### Automatic LDAP Client Installation
 
-Examples:
+If OpenLDAP client tools are missing, the installer will attempt to install them automatically.
 
-#### Arch Linux
+| Distribution | Package Installed |
+|---|---|
+| Arch Linux | `openldap` |
+| Ubuntu / Debian | `ldap-utils` |
+| Rocky / RHEL / AlmaLinux / Fedora | `openldap-clients` |
 
-```bash
-pacman -S openldap
-```
+The installer currently supports automatic LDAP client installation on:
 
-#### Debian / Ubuntu
+- Arch Linux
+- Ubuntu
+- Debian
+- Rocky Linux
+- RHEL
+- AlmaLinux
+- Fedora
 
-```bash
-apt install ldap-utils
-```
-
-#### RHEL / Rocky / Alma
-
-```bash
-dnf install openldap-clients
-```
+If automatic installation is unsupported or fails, install `ldapsearch` manually and rerun the installer.
 
 ---
 
