@@ -40,10 +40,26 @@ BIND_DN="cn=ssh-key-reader,ou=services,dc=ldap,dc=gohilton,dc=com"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SECRET_SOURCE="${SCRIPT_DIR}/ldap-authorized-keys.secret"
 
+SSHD_CONFIG="/etc/ssh/sshd_config"
+INCLUDE_DIRECTIVE="Include /etc/ssh/sshd_config.d/*.conf"
 
 if [[ $EUID -ne 0 ]]; then
   echo "ERROR: Run as root." >&2
   exit 1
+fi
+
+if ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' "$SSHD_CONFIG"; then
+  echo "Adding sshd_config.d Include directive to ${SSHD_CONFIG}..."
+
+  cp -a "$SSHD_CONFIG" "${SSHD_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+
+  {
+    echo "$INCLUDE_DIRECTIVE"
+    echo
+    cat "$SSHD_CONFIG"
+  } > "${SSHD_CONFIG}.new"
+
+  mv "${SSHD_CONFIG}.new" "$SSHD_CONFIG"
 fi
 
 NOLOGIN_SHELL="$(detect_nologin_shell)"
