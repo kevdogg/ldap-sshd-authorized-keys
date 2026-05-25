@@ -24,7 +24,7 @@ detect_sshd_service() {
 }
 
 install_ldap_ca() {
-  local ca_source="${SCRIPT_DIR}/ca.pem"
+  local ca_source="${SCRIPT_DIR}/ldap-ca.crt"
 
   if [[ ! -f "$ca_source" ]]; then
     echo "WARNING: Missing ${ca_source}; skipping LDAP CA installation." >&2
@@ -34,7 +34,7 @@ install_ldap_ca() {
   if command -v update-ca-certificates >/dev/null 2>&1; then
     echo "Installing LDAP CA using update-ca-certificates..."
     install -o root -g root -m 0644 "$ca_source" \
-      /usr/local/share/ca-certificates/ca.pem
+      /usr/local/share/ca-certificates/ldap-ca.crt
     update-ca-certificates
 
   elif command -v trust >/dev/null 2>&1; then
@@ -42,7 +42,7 @@ install_ldap_ca() {
     install -d -o root -g root -m 0755 \
       /etc/ca-certificates/trust-source/anchors
     install -o root -g root -m 0644 "$ca_source" \
-      /etc/ca-certificates/trust-source/anchors/ca.pem
+      /etc/ca-certificates/trust-source/anchors/ldap-ca.crt
     trust extract-compat
 
   elif command -v update-ca-trust >/dev/null 2>&1; then
@@ -50,7 +50,7 @@ install_ldap_ca() {
     install -d -o root -g root -m 0755 \
       /etc/pki/ca-trust/source/anchors
     install -o root -g root -m 0644 "$ca_source" \
-      /etc/pki/ca-trust/source/anchors/ca.pem
+      /etc/pki/ca-trust/source/anchors/ldap-ca.crt
     update-ca-trust
 
   else
