@@ -6,6 +6,11 @@ HELPER_PATH="/usr/local/sbin/ldap-authorized-keys"
 SECRET_PATH="/etc/ssh/ldap-authorized-keys.secret"
 SSHD_SNIPPET="/etc/ssh/sshd_config.d/10-ldap-authkeys.conf"
 
+# ldap-active.gohilton.com represents a HA DNS lookup tweak where technitium will return the active ldap server
+# ldap servers within the dns lookup are:
+#    ldap-prospect.gohilton.com
+#    ldap-quincy.gohilton.com
+
 LDAP_URI="ldaps://ldap-active.gohilton.com"
 BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
 BIND_DN="cn=ssh-key-reader,ou=services,dc=ldap,dc=gohilton,dc=com"
