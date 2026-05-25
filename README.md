@@ -15,18 +15,21 @@ This allows centralized SSH public key management while preserving optional loca
 
 ---
 
-# Features
+# Tested Platforms
 
-* Centralized SSH public keys in LDAP
-* Supports multiple `sshPublicKey` values per user
-* LDAP-first authentication policy
-* Local `~/.ssh/authorized_keys` fallback only if LDAP fails
-* OpenSSH-native implementation
-* No patched OpenSSH modules
-* No PAM/NSS SSH key hacks
-* SSH-side audit logging
-* LDAP-side audit logging
-* Simple portable Bash implementation
+| Distribution | Status |
+|---|---|
+| Arch Linux | Working |
+| Ubuntu Server | Working |
+
+Tested features:
+
+- sshd_config.d include insertion
+- LDAP over LDAPS
+- Custom internal CA trust installation
+- Multiple sshPublicKey values
+- AuthorizedKeysCommand integration
+- SSH login validation
 
 ---
 
@@ -37,7 +40,8 @@ This implementation assumes the OpenSSH LDAP schema is already loaded and users 
 ```text
 objectClass: ldapPublicKey
 sshPublicKey: ssh-ed25519 AAAA...
-```
+ssh -T git@github.com                                                                              99.7.1.104  ─╯
+Hi kevdogg! You've successfully authenticated, but GitHub does not provide shell access.```
 
 Example LDAP entry:
 
@@ -297,6 +301,43 @@ to prevent long SSH hangs during LDAP outages.
 
 ---
 
+# TLS / CA Notes
+
+This project assumes LDAPS with a private/internal CA.
+
+The installer attempts to install `ldap-ca.crt` into the host trust store automatically.
+
+## Debian / Ubuntu
+
+The CA file must use the `.crt` extension or `update-ca-certificates` may ignore it.
+
+Installed to:
+
+```text
+/usr/local/share/ca-certificates/ldap-ca.crt
+```
+
+Then:
+
+```bash
+update-ca-certificates
+```
+
+## Arch Linux
+
+Installed to:
+
+```text
+/etc/ca-certificates/trust-source/anchors/ldap-ca.crt
+```
+
+Then:
+
+```bash
+trust extract-compat
+```
+
+---
 # Recommended Operational Model
 
 Recommended:
