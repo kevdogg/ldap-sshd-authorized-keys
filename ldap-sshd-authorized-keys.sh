@@ -201,8 +201,11 @@ fi
 
 rm -f "$sshd_test_output"
 
-if sshd -G 2>/dev/null | grep -qi '^trustedusercakeys '; then
-  echo "INFO: SSH user certificate trust is configured; leaving certificate settings untouched."
+trusted_user_ca="$(sshd -G 2>/dev/null | sed -n 's/^trustedusercakeys[[:space:]]\+//Ip' | head -n1 || true)"
+
+if [[ -n "$trusted_user_ca" ]]; then
+  echo "INFO: SSH user certificate trust is configured: TrustedUserCAKeys ${trusted_user_ca}"
+  echo "INFO: Certificate settings are unchanged."
 fi
 
 if [[ -n "$SSHD_SERVICE" ]]; then
