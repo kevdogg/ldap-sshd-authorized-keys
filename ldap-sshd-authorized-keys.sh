@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# constants /config
+HELPER_USER="sshd-ldap"
+HELPER_PATH="/usr/local/sbin/ldap-authorized-keys"
+SECRET_PATH="/etc/ssh/ldap-authorized-keys.secret"
+SSHD_SNIPPET="/etc/ssh/sshd_config.d/10-ldap-authkeys.conf"
+
+# ldap-active.gohilton.com represents a HA DNS lookup tweak where technitium will return the active ldap server
+# ldap servers within the dns lookup are:
+#    ldap-prospect.gohilton.com
+#    ldap-quincy.gohilton.com
+
+LDAP_URI="ldaps://ldap-active.gohilton.com"
+BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
+BIND_DN="cn=ssh-key-reader,ou=services,dc=ldap,dc=gohilton,dc=com"
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SECRET_SOURCE="${SCRIPT_DIR}/ldap-authorized-keys.secret"
+
+SSHD_CONFIG="/etc/ssh/sshd_config"
+INCLUDE_DIRECTIVE="Include /etc/ssh/sshd_config.d/*.conf"
+
+# functions
+
 detect_nologin_shell() {
   if [[ -x /usr/sbin/nologin ]]; then
     echo /usr/sbin/nologin
@@ -20,6 +43,43 @@ detect_sshd_service() {
     echo ssh.service
   else
     echo ""
+  fi
+}
+
+install_ldap_client_tools() {
+  local os_id="$1"
+
+  if command -v ldapsearch >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "LDAP client tools not found; attempting installation..."
+
+  case "$os_id" in
+    arch)
+      pacman -S --needed --noconfirm openldap
+      ;;
+
+    ubuntu|debian)
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive \
+        apt-get install -y ldap-utils
+      ;;
+
+    rocky|rhel|almalinux|fedora)
+      dnf install -y openldap-clients
+      ;;
+
+    *)
+      echo "ERROR: Unsupported OS for automatic LDAP client installation: ${os_id}" >&2
+      echo "Install ldapsearch manually and rerun." >&2
+      exit 1
+      ;;
+  esac
+
+  if ! command -v ldapsearch >/dev/null 2>&1; then
+    echo "ERROR: ldapsearch still not found after package installation." >&2
+    exit 1
   fi
 }
 
@@ -59,77 +119,71 @@ install_ldap_ca() {
   fi
 }
 
-HELPER_USER="sshd-ldap"
-HELPER_PATH="/usr/local/sbin/ldap-authorized-keys"
-SECRET_PATH="/etc/ssh/ldap-authorized-keys.secret"
-SSHD_SNIPPET="/etc/ssh/sshd_config.d/10-ldap-authkeys.conf"
+# main 
 
-# ldap-active.gohilton.com represents a HA DNS lookup tweak where technitium will return the active ldap server
-# ldap servers within the dns lookup are:
-#    ldap-prospect.gohilton.com
-#    ldap-quincy.gohilton.com
+main() {
+  local os_id
+  local nologin_shell
+  local sshd_service
+  local trusted_user_ca
 
-LDAP_URI="ldaps://ldap-active.gohilton.com"
-BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
-BIND_DN="cn=ssh-key-reader,ou=services,dc=ldap,dc=gohilton,dc=com"
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SECRET_SOURCE="${SCRIPT_DIR}/ldap-authorized-keys.secret"
-
-SSHD_CONFIG="/etc/ssh/sshd_config"
-INCLUDE_DIRECTIVE="Include /etc/ssh/sshd_config.d/*.conf"
-
-if [[ $EUID -ne 0 ]]; then
-  echo "ERROR: Run as root." >&2
-  exit 1
-fi
-
-if ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' "$SSHD_CONFIG"; then
-  echo "Adding sshd_config.d Include directive to ${SSHD_CONFIG}..."
-
-  cp -a "$SSHD_CONFIG" "${SSHD_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
-
-  {
-    echo "$INCLUDE_DIRECTIVE"
-    echo
-    cat "$SSHD_CONFIG"
-  } > "${SSHD_CONFIG}.new"
-
-  mv "${SSHD_CONFIG}.new" "$SSHD_CONFIG"
-fi
-
-NOLOGIN_SHELL="$(detect_nologin_shell)"
-SSHD_SERVICE="$(detect_sshd_service)"
-
-if [[ ! -f "$SECRET_SOURCE" ]]; then
-  echo "ERROR: Missing ${SECRET_SOURCE}" >&2
-  echo "Create it from ldap-authorized-keys.secret.example and do not commit it." >&2
-  exit 1
-fi
-
-if ! command -v ldapsearch >/dev/null 2>&1; then
-  echo "ERROR: ldapsearch not found. Install OpenLDAP client tools first." >&2
-  exit 1
-fi
-
-if ! command -v sshd >/dev/null 2>&1; then
-  echo "ERROR: sshd not found." >&2
-  exit 1
-fi
-
-if ! id "$HELPER_USER" >/dev/null 2>&1; then
-  useradd --system --no-create-home --shell "$NOLOGIN_SHELL" "$HELPER_USER"
-fi
-
-install -d -m 0755 /usr/local/sbin
-install -d -m 0755 /etc/ssh
-install -d -m 0755 /etc/ssh/sshd_config.d
-
-# Install secret, stripping CR/LF so ldapsearch -y does not receive a bad password.
-tr -d '\r\n' < "$SECRET_SOURCE" > "$SECRET_PATH"
-chown root:"$HELPER_USER" "$SECRET_PATH"
-chmod 0640 "$SECRET_PATH"
-
+  if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: Run as root." >&2
+    exit 1
+  fi
+  
+  install -d -m 0755 /usr/local/sbin
+  install -d -m 0755 /etc/ssh
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  
+  if ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' "$SSHD_CONFIG"; then
+    echo "Adding sshd_config.d Include directive to ${SSHD_CONFIG}..."
+  
+    cp -a "$SSHD_CONFIG" "${SSHD_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+  
+    {
+      echo "$INCLUDE_DIRECTIVE"
+      echo
+      cat "$SSHD_CONFIG"
+    } > "${SSHD_CONFIG}.new"
+  
+    mv "${SSHD_CONFIG}.new" "$SSHD_CONFIG"
+  fi
+  
+  nologin_shell="$(detect_nologin_shell)"
+  sshd_service="$(detect_sshd_service)"
+  
+  if [[ ! -f "$SECRET_SOURCE" ]]; then
+    echo "ERROR: Missing ${SECRET_SOURCE}" >&2
+    echo "Create it from ldap-authorized-keys.secret.example and do not commit it." >&2
+    exit 1
+  fi
+  
+  if [[ -r /etc/os-release ]]; then
+    . /etc/os-release
+    os_id="${ID,,}"
+  else
+    echo "ERROR: Cannot determine operating system." >&2
+    exit 1
+  fi
+  
+  install_ldap_client_tools "$os_id"
+  
+  if ! command -v sshd >/dev/null 2>&1; then
+    echo "ERROR: sshd not found." >&2
+    exit 1
+  fi
+  
+  if ! id "$HELPER_USER" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell "$nologin_shell" "$HELPER_USER"
+  fi
+  
+  
+  # Install secret, stripping CR/LF so ldapsearch -y does not receive a bad password.
+  tr -d '\r\n' < "$SECRET_SOURCE" > "$SECRET_PATH"
+  chown root:"$HELPER_USER" "$SECRET_PATH"
+  chmod 0640 "$SECRET_PATH"
+  
 cat > "$HELPER_PATH" <<EOF
 #!/bin/sh
 set -eu
@@ -170,58 +224,62 @@ if [ -n "\$home" ] && [ -r "\$home/.ssh/authorized_keys" ]; then
   cat "\$home/.ssh/authorized_keys"
 fi
 EOF
-
-chown root:root "$HELPER_PATH"
-chmod 0755 "$HELPER_PATH"
-
+  
+  chown root:root "$HELPER_PATH"
+  chmod 0755 "$HELPER_PATH"
+  
 cat > "$SSHD_SNIPPET" <<EOF
 AuthorizedKeysFile none
 AuthorizedKeysCommand $HELPER_PATH %u
 AuthorizedKeysCommandUser $HELPER_USER
 EOF
-
-install_ldap_ca
-
-echo "Validating sshd configuration..."
-
-sshd_test_output="$(mktemp)"
-if ! sshd -t 2>"$sshd_test_output"; then
-  cat "$sshd_test_output" >&2
-  rm -f "$sshd_test_output"
-  echo "ERROR: sshd config validation failed. Not reloading SSH." >&2
-  exit 1
-fi
-
-if [[ -s "$sshd_test_output" ]]; then
-  cat "$sshd_test_output" >&2
-  rm -f "$sshd_test_output"
-  echo "ERROR: sshd config validation produced stderr output. Not reloading SSH." >&2
-  exit 1
-fi
-
-rm -f "$sshd_test_output"
-
-trusted_user_ca="$(sshd -G 2>/dev/null | sed -n 's/^trustedusercakeys[[:space:]]\+//Ip' | head -n1 || true)"
-
-if [[ -n "$trusted_user_ca" ]]; then
-  echo "INFO: SSH user certificate trust is configured: TrustedUserCAKeys ${trusted_user_ca}"
-  echo "INFO: Certificate settings are unchanged."
-fi
-
-if [[ -n "$SSHD_SERVICE" ]]; then
-  echo "Reloading ${SSHD_SERVICE}..."
-  if ! systemctl reload "$SSHD_SERVICE"; then
-    echo "ERROR: Failed to reload ${SSHD_SERVICE}." >&2
+  
+  install_ldap_ca
+  
+  echo "Validating sshd configuration..."
+  
+  sshd_test_output="$(mktemp)"
+  if ! sshd -t 2>"$sshd_test_output"; then
+    cat "$sshd_test_output" >&2
+    rm -f "$sshd_test_output"
+    echo "ERROR: sshd config validation failed. Not reloading SSH." >&2
     exit 1
   fi
-else
-  echo "WARNING: Could not detect ssh/sshd systemd unit. Config validated, but sshd was not reloaded." >&2
-fi
+  
+  if [[ -s "$sshd_test_output" ]]; then
+    cat "$sshd_test_output" >&2
+    rm -f "$sshd_test_output"
+    echo "ERROR: sshd config validation produced stderr output. Not reloading SSH." >&2
+    exit 1
+  fi
+  
+  rm -f "$sshd_test_output"
+  
+  trusted_user_ca="$(sshd -G 2>/dev/null | sed -n 's/^trustedusercakeys[[:space:]]\+//Ip' | head -n1 || true)"
+  
+  if [[ -n "$trusted_user_ca" ]]; then
+    echo "INFO: SSH user certificate trust is configured: TrustedUserCAKeys ${trusted_user_ca}"
+    echo "INFO: Certificate settings are unchanged."
+  fi
+  
+  if [[ -n "$sshd_service" ]]; then
+    echo "Reloading ${sshd_service}..."
+    if ! systemctl reload "$sshd_service"; then
+      echo "ERROR: Failed to reload ${sshd_service}." >&2
+      exit 1
+    fi
+  else
+    echo "WARNING: Could not detect ssh/sshd systemd unit. Config validated, but sshd was not reloaded." >&2
+  fi
+  
+  echo "Installed LDAP SSH authorized keys helper."
+  echo
+  echo "Active sshd AuthorizedKeys settings:"
+  sshd -T | grep -i authorizedkeys || true
+  echo
+  echo "Test with:"
+  echo "  sudo -u $HELPER_USER $HELPER_PATH kevdog"
+}
 
-echo "Installed LDAP SSH authorized keys helper."
-echo
-echo "Active sshd AuthorizedKeys settings:"
-sshd -T | grep -i authorizedkeys || true
-echo
-echo "Test with:"
-echo "  sudo -u $HELPER_USER $HELPER_PATH kevdog"
+# execution
+main "$@"
