@@ -201,7 +201,7 @@ fi
 
 rm -f "$sshd_test_output"
 
-if sshd -T | grep -qi '^trustedusercakeys '; then
+if sshd -G 2>/dev/null | grep -qi '^trustedusercakeys '; then
   echo "INFO: SSH user certificate trust is configured; leaving certificate settings untouched."
 fi
 
