@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+detect_nologin_shell() {
+  if [[ -x /usr/sbin/nologin ]]; then
+    echo /usr/sbin/nologin
+  elif [[ -x /sbin/nologin ]]; then
+    echo /sbin/nologin
+  elif [[ -x /usr/bin/nologin ]]; then
+    echo /usr/bin/nologin
+  else
+    echo /bin/false
+  fi
+}
+
+detect_sshd_service() {
+  if systemctl list-unit-files --type=service --no-legend sshd.service 2>/dev/null | grep -q '^sshd\.service'; then
+    echo sshd.service
+  elif systemctl list-unit-files --type=service --no-legend ssh.service 2>/dev/null | grep -q '^ssh\.service'; then
+    echo ssh.service
+  else
+    echo ""
+  fi
+}
+
 HELPER_USER="sshd-ldap"
 HELPER_PATH="/usr/local/sbin/ldap-authorized-keys"
 SECRET_PATH="/etc/ssh/ldap-authorized-keys.secret"
@@ -24,6 +46,9 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+NOLOGIN_SHELL="$(detect_nologin_shell)"
+SSHD_SERVICE="$(detect_sshd_service)"
+
 if [[ ! -f "$SECRET_SOURCE" ]]; then
   echo "ERROR: Missing ${SECRET_SOURCE}" >&2
   echo "Create it from ldap-authorized-keys.secret.example and do not commit it." >&2
@@ -41,7 +66,7 @@ if ! command -v sshd >/dev/null 2>&1; then
 fi
 
 if ! id "$HELPER_USER" >/dev/null 2>&1; then
-  useradd --system --no-create-home --shell /usr/bin/nologin "$HELPER_USER"
+  useradd --system --no-create-home --shell "$NOLOGIN_SHELL" "$HELPER_USER"
 fi
 
 install -d -m 0755 /usr/local/sbin
@@ -103,8 +128,21 @@ AuthorizedKeysCommand $HELPER_PATH %u
 AuthorizedKeysCommandUser $HELPER_USER
 EOF
 
-sshd -t
-systemctl reload sshd
+echo "Validating sshd configuration..."
+if ! sshd -t; then
+  echo "ERROR: sshd config validation failed. Not reloading SSH." >&2
+  exit 1
+fi
+
+if [[ -n "$SSHD_SERVICE" ]]; then
+  echo "Reloading ${SSHD_SERVICE}..."
+  if ! systemctl reload "$SSHD_SERVICE"; then
+    echo "ERROR: Failed to reload ${SSHD_SERVICE}." >&2
+    exit 1
+  fi
+else
+  echo "WARNING: Could not detect ssh/sshd systemd unit. Config validated, but sshd was not reloaded." >&2
+fi
 
 echo "Installed LDAP SSH authorized keys helper."
 echo
