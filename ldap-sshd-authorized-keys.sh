@@ -188,6 +188,10 @@ if ! sshd -t; then
   exit 1
 fi
 
+if sshd -T | grep -qi '^trustedusercakeys '; then
+  echo "INFO: SSH user certificate trust is configured; leaving certificate settings untouched."
+fi
+
 if [[ -n "$SSHD_SERVICE" ]]; then
   echo "Reloading ${SSHD_SERVICE}..."
   if ! systemctl reload "$SSHD_SERVICE"; then
