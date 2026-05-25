@@ -183,10 +183,23 @@ EOF
 install_ldap_ca
 
 echo "Validating sshd configuration..."
-if ! sshd -t; then
+
+sshd_test_output="$(mktemp)"
+if ! sshd -t 2>"$sshd_test_output"; then
+  cat "$sshd_test_output" >&2
+  rm -f "$sshd_test_output"
   echo "ERROR: sshd config validation failed. Not reloading SSH." >&2
   exit 1
 fi
+
+if [[ -s "$sshd_test_output" ]]; then
+  cat "$sshd_test_output" >&2
+  rm -f "$sshd_test_output"
+  echo "ERROR: sshd config validation produced stderr output. Not reloading SSH." >&2
+  exit 1
+fi
+
+rm -f "$sshd_test_output"
 
 if sshd -T | grep -qi '^trustedusercakeys '; then
   echo "INFO: SSH user certificate trust is configured; leaving certificate settings untouched."
