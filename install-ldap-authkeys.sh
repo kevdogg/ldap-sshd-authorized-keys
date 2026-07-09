@@ -190,6 +190,11 @@ set -eu
 
 user="\$1"
 
+if [ -f /etc/ssh/ldap-authorized-keys.debug ]; then
+  logger -t ldap-authorized-keys \
+    "lookup user=$user from=${SSH_CONNECTION:-unknown}"
+fi
+
 case "\$user" in
   *[!a-zA-Z0-9._-]*|'')
     exit 0
