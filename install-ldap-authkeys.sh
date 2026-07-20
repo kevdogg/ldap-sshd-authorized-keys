@@ -2,7 +2,6 @@
 set -euo pipefail
 
 # constants /config
-# HELPER_USER="sshd-ldap"
 HELPER_PATH="/usr/local/sbin/ldap-authorized-keys"
 SECRET_PATH="/etc/ssh/ldap-authorized-keys.secret"
 SSHD_SNIPPET="/etc/ssh/sshd_config.d/10-ldap-authkeys.conf"
@@ -125,7 +124,6 @@ install_ldap_ca() {
 
 main() {
   local os_id
-  local nologin_shell
   local sshd_service
   local trusted_user_ca
 
@@ -152,7 +150,6 @@ main() {
     mv "${SSHD_CONFIG}.new" "$SSHD_CONFIG"
   fi
   
-  nologin_shell="$(detect_nologin_shell)"
   sshd_service="$(detect_sshd_service)"
   
   if [[ ! -f "$SECRET_SOURCE" ]]; then
@@ -176,14 +173,9 @@ main() {
     exit 1
   fi
   
-#   if ! id "$HELPER_USER" >/dev/null 2>&1; then
-#     useradd --system --no-create-home --shell "$nologin_shell" "$HELPER_USER"
-#   fi
-  
-  
   # Install secret, stripping CR/LF so ldapsearch -y does not receive a bad password.
   tr -d '\r\n' < "$SECRET_SOURCE" > "$SECRET_PATH"
-  chown root:"$HELPER_USER" "$SECRET_PATH"
+  chown root:root "$SECRET_PATH"
   chmod 0600 "$SECRET_PATH"
   
 cat > "$HELPER_PATH" <<EOF
@@ -248,24 +240,24 @@ done
 
 # LDAP keys take priority. If at least one key was found, return only
 # those keys and do not consult the local authorized_keys file.
-if [ "$ldap_failed" -eq 0 ] && [ -n "$ldap_keys" ]; then
-  printf '%s\n' "$ldap_keys"
+if [ -n "\$ldap_keys" ]; then
+  printf '%s\n' "\$ldap_keys"
   exit 0
 fi
 
 home="$(
-  getent passwd "$user" |
-    awk -F: 'NR == 1 { print $6 }'
+  getent passwd "\$user" |
+    awk -F: 'NR == 1 { print \$6 }'
 )"
 
-if [ -n "$home" ] && [ -r "$home/.ssh/authorized_keys" ]; then
-  cat "$home/.ssh/authorized_keys"
+if [ -n "\$home" ] && [ -r "\$home/.ssh/authorized_keys" ]; then
+  cat "\$home/.ssh/authorized_keys"
 fi
 
 exit 0
 EOF
   
-  # chown root:root "$HELPER_PATH"
+  chown root:root "$HELPER_PATH"
   chmod 0755 "$HELPER_PATH"
   
 cat > "$SSHD_SNIPPET" <<EOF
@@ -318,7 +310,7 @@ EOF
   sshd -T | grep -i authorizedkeys || true
   echo
   echo "Test with:"
-  echo "  sudo -u $HELPER_USER $HELPER_PATH kevdog"
+  echo "  sudo $HELPER_PATH kevdog"
 }
 
 # execution
