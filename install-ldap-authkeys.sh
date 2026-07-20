@@ -205,7 +205,7 @@ for base_dn in "\$USER_BASE_DN" "\$SERVICE_BASE_DN"; do
       "(&(objectClass=ldapPublicKey)(cn=\$user))" \\
       sshPublicKey 2>/dev/null
   )"; then
-    found_keys="$(printf '%s\n' "$ldap_output" | sed -n 's/^sshPublicKey: //p')"
+    found_keys="\$(printf '%s\n' "\$ldap_output" | sed -n 's/^sshPublicKey: //p')"
 
     if [ -n "\$found_keys" ]; then
       if [ -n "\$ldap_keys" ]; then
@@ -227,7 +227,7 @@ if [ -n "\$ldap_keys" ]; then
   exit 0
 fi
 
-home="$(
+home="\$(
   getent passwd "\$user" |
     awk -F: 'NR == 1 { print \$6 }'
 )"
