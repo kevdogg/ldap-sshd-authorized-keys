@@ -13,7 +13,9 @@ SSHD_SNIPPET="/etc/ssh/sshd_config.d/10-ldap-authkeys.conf"
 #    ldap-quincy.gohilton.com
 
 LDAP_URI="ldaps://ldap-active.gohilton.com"
-BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
+# BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
+USER_BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
+SERVICE_BASE_DN="ou=ssh,ou=services,dc=ldap,dc=gohilton,dc=com"
 BIND_DN="cn=ssh-key-reader,ou=services,dc=ldap,dc=gohilton,dc=com"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -202,26 +204,55 @@ case "\$user" in
 esac
 
 LDAP_URI="$LDAP_URI"
-BASE_DN="$BASE_DN"
+USER_BASE_DN="$USER_BASE_DN"
+SERVICE_BASE_DN="$SERVICE_BASE_DN"
 BIND_DN="$BIND_DN"
 BIND_PW_FILE="$SECRET_PATH"
 
-ldap_output="\$(
-  ldapsearch \\
-    -LLL \\
-    -o ldif-wrap=no \\
-    -o nettimeout=3 \\
-    -l 3 \\
-    -H "\$LDAP_URI" \\
-    -D "\$BIND_DN" \\
-    -y "\$BIND_PW_FILE" \\
-    -b "\$BASE_DN" \\
-    "(&(objectClass=ldapPublicKey)(cn=\$user))" \\
-    sshPublicKey 2>/dev/null
-)" && {
-  printf '%s\n' "\$ldap_output" | sed -n 's/^sshPublicKey: //p'
+ldap_keys=""
+ldap_failed=0
+
+for base_dn in "\$USER_BASE_DN" "\$SERVICE_BASE_DN"; do
+  if ldap_output="\$(
+    ldapsearch \\
+      -x \\
+      -LLL \\
+      -o ldif-wrap=no \\
+      -o nettimeout=3 \\
+      -l 3 \\
+      -H "\$LDAP_URI" \\
+      -D "\$BIND_DN" \\
+      -y "\$BIND_PW_FILE" \\
+      -b "\$base_dn" \\
+      "(&(objectClass=ldapPublicKey)(cn=\$user))" \\
+      sshPublicKey 2>/dev/null
+  )"; then
+    found_keys="\$(
+      printf '%s\n' "\$ldap_output" |
+        sed -n 's/^sshPublicKey: //p'
+    )"
+
+    if [ -n "\$found_keys" ]; then
+      if [ -n "\$ldap_keys" ]; then
+        ldap_keys="\$ldap_keys
+\$found_keys"
+      else
+        ldap_keys="\$found_keys"
+      fi
+    fi
+  else
+    ldap_failed=1
+    break
+  fi
+done
+
+if [ "\$ldap_failed" -eq 0 ]; then
+  if [ -n "\$ldap_keys" ]; then
+    printf '%s\n' "\$ldap_keys"
+  fi
+
   exit 0
-}
+fi
 
 home="\$(getent passwd "\$user" | awk -F: '{print \$6}')"
 
