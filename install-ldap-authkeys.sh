@@ -12,7 +12,6 @@ SSHD_SNIPPET="/etc/ssh/sshd_config.d/10-ldap-authkeys.conf"
 #    ldap-quincy.gohilton.com
 
 LDAP_URI="ldaps://ldap-active.gohilton.com"
-# BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
 USER_BASE_DN="ou=users,dc=ldap,dc=gohilton,dc=com"
 SERVICE_BASE_DN="ou=ssh,ou=services,dc=ldap,dc=gohilton,dc=com"
 BIND_DN="cn=ssh-key-reader,ou=services,dc=ldap,dc=gohilton,dc=com"
@@ -24,18 +23,6 @@ SSHD_CONFIG="/etc/ssh/sshd_config"
 INCLUDE_DIRECTIVE="Include /etc/ssh/sshd_config.d/*.conf"
 
 # functions
-
-# detect_nologin_shell() {
-#   if [[ -x /usr/sbin/nologin ]]; then
-#     echo /usr/sbin/nologin
-#   elif [[ -x /sbin/nologin ]]; then
-#     echo /sbin/nologin
-#   elif [[ -x /usr/bin/nologin ]]; then
-#     echo /usr/bin/nologin
-#   else
-#     echo /bin/false
-#   fi
-# }
 
 detect_sshd_service() {
   if systemctl list-unit-files --type=service --no-legend sshd.service 2>/dev/null | grep -q '^sshd\.service'; then
@@ -202,7 +189,6 @@ BIND_DN="$BIND_DN"
 BIND_PW_FILE="$SECRET_PATH"
 
 ldap_keys=""
-ldap_failed=0
 
 for base_dn in "\$USER_BASE_DN" "\$SERVICE_BASE_DN"; do
   if ldap_output="\$(
@@ -219,10 +205,7 @@ for base_dn in "\$USER_BASE_DN" "\$SERVICE_BASE_DN"; do
       "(&(objectClass=ldapPublicKey)(cn=\$user))" \\
       sshPublicKey 2>/dev/null
   )"; then
-    found_keys="\$(
-      printf '%s\n' "\$ldap_output" |
-        sed -n 's/^sshPublicKey: //p'
-    )"
+    found_keys="$(printf '%s\n' "$ldap_output" | sed -n 's/^sshPublicKey: //p')"
 
     if [ -n "\$found_keys" ]; then
       if [ -n "\$ldap_keys" ]; then
@@ -233,8 +216,7 @@ for base_dn in "\$USER_BASE_DN" "\$SERVICE_BASE_DN"; do
       fi
     fi
   else
-    ldap_failed=1
-    break
+    continue 
   fi
 done
 
