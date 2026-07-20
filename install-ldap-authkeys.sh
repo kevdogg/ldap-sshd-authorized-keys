@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # constants /config
-HELPER_USER="sshd-ldap"
+# HELPER_USER="sshd-ldap"
 HELPER_PATH="/usr/local/sbin/ldap-authorized-keys"
 SECRET_PATH="/etc/ssh/ldap-authorized-keys.secret"
 SSHD_SNIPPET="/etc/ssh/sshd_config.d/10-ldap-authkeys.conf"
@@ -26,17 +26,17 @@ INCLUDE_DIRECTIVE="Include /etc/ssh/sshd_config.d/*.conf"
 
 # functions
 
-detect_nologin_shell() {
-  if [[ -x /usr/sbin/nologin ]]; then
-    echo /usr/sbin/nologin
-  elif [[ -x /sbin/nologin ]]; then
-    echo /sbin/nologin
-  elif [[ -x /usr/bin/nologin ]]; then
-    echo /usr/bin/nologin
-  else
-    echo /bin/false
-  fi
-}
+# detect_nologin_shell() {
+#   if [[ -x /usr/sbin/nologin ]]; then
+#     echo /usr/sbin/nologin
+#   elif [[ -x /sbin/nologin ]]; then
+#     echo /sbin/nologin
+#   elif [[ -x /usr/bin/nologin ]]; then
+#     echo /usr/bin/nologin
+#   else
+#     echo /bin/false
+#   fi
+# }
 
 detect_sshd_service() {
   if systemctl list-unit-files --type=service --no-legend sshd.service 2>/dev/null | grep -q '^sshd\.service'; then
@@ -176,15 +176,15 @@ main() {
     exit 1
   fi
   
-  if ! id "$HELPER_USER" >/dev/null 2>&1; then
-    useradd --system --no-create-home --shell "$nologin_shell" "$HELPER_USER"
-  fi
+#   if ! id "$HELPER_USER" >/dev/null 2>&1; then
+#     useradd --system --no-create-home --shell "$nologin_shell" "$HELPER_USER"
+#   fi
   
   
   # Install secret, stripping CR/LF so ldapsearch -y does not receive a bad password.
   tr -d '\r\n' < "$SECRET_SOURCE" > "$SECRET_PATH"
   chown root:"$HELPER_USER" "$SECRET_PATH"
-  chmod 0640 "$SECRET_PATH"
+  chmod 0600 "$SECRET_PATH"
   
 cat > "$HELPER_PATH" <<EOF
 #!/bin/sh
@@ -246,28 +246,32 @@ for base_dn in "\$USER_BASE_DN" "\$SERVICE_BASE_DN"; do
   fi
 done
 
-if [ "\$ldap_failed" -eq 0 ]; then
-  if [ -n "\$ldap_keys" ]; then
-    printf '%s\n' "\$ldap_keys"
-  fi
-
+# LDAP keys take priority. If at least one key was found, return only
+# those keys and do not consult the local authorized_keys file.
+if [ "$ldap_failed" -eq 0 ] && [ -n "$ldap_keys" ]; then
+  printf '%s\n' "$ldap_keys"
   exit 0
 fi
 
-home="\$(getent passwd "\$user" | awk -F: '{print \$6}')"
+home="$(
+  getent passwd "$user" |
+    awk -F: 'NR == 1 { print $6 }'
+)"
 
-if [ -n "\$home" ] && [ -r "\$home/.ssh/authorized_keys" ]; then
-  cat "\$home/.ssh/authorized_keys"
+if [ -n "$home" ] && [ -r "$home/.ssh/authorized_keys" ]; then
+  cat "$home/.ssh/authorized_keys"
 fi
+
+exit 0
 EOF
   
-  chown root:root "$HELPER_PATH"
+  # chown root:root "$HELPER_PATH"
   chmod 0755 "$HELPER_PATH"
   
 cat > "$SSHD_SNIPPET" <<EOF
 AuthorizedKeysFile none
 AuthorizedKeysCommand $HELPER_PATH %u
-AuthorizedKeysCommandUser $HELPER_USER
+AuthorizedKeysCommandUser root
 EOF
   
   install_ldap_ca
